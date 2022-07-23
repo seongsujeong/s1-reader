@@ -254,22 +254,25 @@ def get_burst_centers_and_boundaries(tree):
 
     return center_pts, boundary_pts
 
-def get_ipf_version(tree:ET):
+def get_ipf_version(tree: ET):
     '''Extract the IPF version from the ET of manifest.safe
     '''
-    elem_metadata_section=tree.find('metadataSection')
-    flag_found_ipf_version=False
-    idx_processing=0
-    for idx_processing,elem_sub in enumerate(elem_metadata_section):
-        if elem_sub.attrib['ID']=='processing':
-            flag_found_ipf_version=True
-            break
+    # path to xmlData in manifest
+    xml_meta_path = 'metadataSection/metadataObject/metadataWrap/xmlData'
 
-    if flag_found_ipf_version:
-        str_ipf_version=elem_metadata_section[idx_processing][0][0][0][0][0].attrib['version']
-        return float(str_ipf_version)
+    # piecemeal build path to software path to access version attrib
+    esa_http = '{http://www.esa.int/safe/sentinel-1.0}'
+    processing = xml_meta_path + f'/{esa_http}processing'
+    facility = processing + f'/{esa_http}facility'
+    software = facility + f'/{esa_http}software'
 
-def is_eap_correction_necesasry(ipf_version:float) -> int :
+    # get version from software element
+    software_elem = tree.find(software)
+    ipf_version = float(software_elem.attrib['version'])
+
+    return ipf_version
+
+def is_eap_correction_necesasry(ipf_version: float) -> int :
     '''Examines if what level of EAP correction is necessary, based on the IPF version
     0: No EAP correction necessary (i.e. correction already applied)
     1: Phase-only correction is necessary
@@ -309,10 +312,6 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
     _, tail = os.path.split(annotation_path)
     platform_id, subswath_id, _, pol = [x.upper() for x in tail.split('-')[:4]]
 
-    noise_annotation_path=annotation_path.replace('annotation/','annotation/calibration/noise-')
-    calibration_annotation_path=annotation_path.replace('annotation/','annotation/calibration/calibration-')
-    manifest_path=os.path.dirname(annotation_path).replace('annotation','')+'manifest.safe'
-
     # For IW mode, one burst has a duration of ~2.75 seconds and a burst
     # overlap of approximately ~0.4 seconds.
     # https://sentinels.copernicus.eu/web/sentinel/user-guides/sentinel-1-sar/product-types-processing-levels/level-1
@@ -321,29 +320,27 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
     burst_interval = 2.758277
 
     #parse manifest.safe to retrieve IPF version
+    manifest_path = os.path.dirname(annotation_path).replace('annotation','') + 'manifest.safe'
     with open_method(manifest_path, 'r') as f_manifest:
-        tree_manfest=ET.parse(f_manifest)
-        ipf_version=get_ipf_version(tree_manfest)
+        tree_manfest = ET.parse(f_manifest)
+        ipf_version = get_ipf_version(tree_manfest)
 
     #Load the Product annotation - for EAP calibration
     with open_method(annotation_path, 'r') as f_lads:
-        tree_lads=ET.parse(f_lads)
-        product_annotation=s1_annotation.ProductAnnotation.from_et(tree_lads)
+        tree_lads = ET.parse(f_lads)
+        product_annotation = s1_annotation.ProductAnnotation.from_et(tree_lads)
 
     #load the Calibraton annotation
+    calibration_annotation_path = annotation_path.replace('annotation/','annotation/calibration/calibration-')
     with open_method(calibration_annotation_path, 'r') as f_cads:
-        tree_cads=ET.parse(f_cads)
-        calibration_annotation=s1_annotation.CalibrationAnnotation.from_et(tree_cads)
+        tree_cads = ET.parse(f_cads)
+        calibration_annotation = s1_annotation.CalibrationAnnotation.from_et(tree_cads)
 
     #load the Noise annotation
+    noise_annotation_path = annotation_path.replace('annotation/','annotation/calibration/noise-')
     with open_method(noise_annotation_path, 'r') as f_nads:
-        tree_nads=ET.parse(f_nads)
-        noise_annotation=s1_annotation.NoiseAnnotation.from_et(tree_nads,tree_lads,ipf_version=ipf_version)
-
-    #find the corresponding AUX_CAL and load
-    aux_cal=None #placeholder
-
-
+        tree_nads = ET.parse(f_nads)
+        noise_annotation = s1_annotation.NoiseAnnotation.from_et(tree_nads,ipf_version=ipf_version)
 
     # Nearly all metadata loaded here is common to all bursts in annotation XML
     with open_method(annotation_path, 'r') as f:
@@ -460,7 +457,6 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
 
         bursts_noise=s1_annotation.BurstNoise()
         bursts_noise.from_noise_annotation(noise_annotation,sensing_start,i*n_lines,(i+1)*n_lines-1,ipf_version)
-        burst_eap=None #placeholder
 
         bursts[i] = Sentinel1BurstSlc(ipf_version, sensing_start, radar_freq, wavelength,
                                       azimuth_steer_rate, azimuth_time_interval,
@@ -474,7 +470,7 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
                                       last_sample, first_valid_line, last_line,
                                       range_window_type, range_window_coeff,
                                       rank, prf_raw_data, range_chirp_ramp_rate,
-                                      burst_calibration, bursts_noise, burst_eap)
+                                      burst_calibration, bursts_noise, None) #TODO Replace the last argument (i.e. None) with an instance of BurstNoise when EAP correction is in place.
 
     return bursts
 

@@ -13,15 +13,19 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 @dataclass
 class AnnotationBase:
     '''
-    A base class of the inheriting annotation class i.e. Product, Calibration, and Noise.
+    A virtual base class of the inheriting annotation class i.e. Product, Calibration, and Noise.
+    Not intended for standalone use.
     '''
     # A parent class for annotation reader for Calibrarion, Noise, and Product
     xml_et: ET
     #kind:str
 
     @classmethod
-    def _parse_scalar(cls,path_field:str, str_type:str):
-        '''Parse the scalar value in the annotation'''
+    def _parse_scalar(cls, path_field: str, str_type: str):
+        '''Parse the scalar value in the annotation
+        path_field: field in the xml_et to parse
+        str_type: Choose how the taxts in the field will be parsed: {datetime, scalar_int, scalar_float, vector_int, vector_float, str}
+        '''
         elem_field=cls.xml_et.find(path_field)
         if str_type=='datetime':
             val_out=datetime.datetime.strptime(elem_field.text,'%Y-%m-%dT%H:%M:%S.%f')
@@ -42,14 +46,17 @@ class AnnotationBase:
             val_out=elem_field.text
 
         else:
-            raise ValueError(f'Cannot recognize the type of the element: "{str_type}"')
+            raise ValueError(f'Unsupported type the element: "{str_type}"')
 
         return val_out
 
     @classmethod
-    def _parse_vectorlist(cls, name_vector_list:str, name_vector:str, str_type:str):
-        '''Parse the list of the values in the annotation'''
-        #NOTE: str type: ['datetime','scalar_integer','scalar_float','vector_integer','vector_float','str']
+    def _parse_vectorlist(cls, name_vector_list: str, name_vector: str, str_type: str):
+        '''Parse the list of the values in the Sentinel-1 annotation data set
+        name_vector_list: Name of the vector list to access
+        name_vector: Name of the vector to parse
+        str_type: Choose how the taxts in the field will be parsed: {datetime, scalar_int, scalar_float, vector_int, vector_float, str}
+        '''
 
         element_to_parse=cls.xml_et.find(name_vector_list)
         num_element=len(element_to_parse)
@@ -95,16 +102,16 @@ class AnnotationBase:
 class CalibrationAnnotation(AnnotationBase):
     '''Reader for Calibration Annotation Data Set (CADS)'''
     list_azimuth_time: np.ndarray
-    list_line:list
-    list_pixel:None
-    list_sigma_nought:list
-    list_beta_nought:list
-    list_gamma:list
-    list_dn:list
+    list_line: list
+    list_pixel: None
+    list_sigma_nought: list
+    list_beta_nought : list
+    list_gamma: list
+    list_dn: list
 
     @classmethod
-    def from_et(cls,et_in=None):
-        '''Extracts list of calibration from etree'''
+    def from_et(cls, et_in=None):
+        '''Extracts the list of calibration informaton from etree from CADS'''
         cls.xml_et=et_in
         cls.list_azimuth_time=cls._parse_vectorlist('calibrationVectorList','azimuthTime','datetime')
         cls.list_line=cls._parse_vectorlist('calibrationVectorList','line','scalar_int')
@@ -124,19 +131,19 @@ class NoiseAnnotation(AnnotationBase):
     #in ISCE2 code: if float(self.IPFversion) < 2.90:
     # REF: .../isce2/components/isceobj/Sensor/GRD/Sentinel1.py
 
-    rg_list_azimuth_time:np.ndarray
-    rg_list_line:list
-    rg_list_pixel:list
-    rg_list_noise_range_lut:list
-    az_first_azimuth_line:int
-    az_first_range_sample:int
-    az_last_azimuth_line:int
-    az_last_range_sample:int
-    az_line:np.ndarray
-    az_noise_azimuth_lut:np.ndarray
+    rg_list_azimuth_time: np.ndarray
+    rg_list_line: list
+    rg_list_pixel: list
+    rg_list_noise_range_lut: list
+    az_first_azimuth_line: int
+    az_first_range_sample: int
+    az_last_azimuth_line: int
+    az_last_range_sample: int
+    az_line: np.ndarray
+    az_noise_azimuth_lut: np.ndarray
 
     @classmethod
-    def from_et(cls,et_in:ET,et_in_lads:ET=None,ipf_version=3.10):
+    def from_et(cls,et_in, ipf_version=3.10):
         '''Extracts list of noise information from etree'''
         if et_in is not None:
             cls.xml_et=et_in
@@ -171,20 +178,20 @@ class NoiseAnnotation(AnnotationBase):
 @dataclass
 class ProductAnnotation(AnnotationBase):
     '''For L1 SLC product annotation file. For EAP correction.'''
-    image_information_slant_range_time:float
+    image_information_slant_range_time: float
     #elevation_angle:
-    antenna_pattern_azimuth_time:list
-    antenna_pattern_slant_range_time:list
-    antenna_pattern_elevation_angle:list
-    antenna_pattern_elevation_pattern:list
+    antenna_pattern_azimuth_time: list
+    antenna_pattern_slant_range_time: list
+    antenna_pattern_elevation_angle: list
+    antenna_pattern_elevation_pattern: list
 
-    ascending_node_time:datetime
-    number_of_samples:int
-    range_sampling_rate:float
+    ascending_node_time: datetime
+    number_of_samples: int
+    range_sampling_rate: float
 
     @classmethod
-    def from_et(cls,et_in):
-        '''Extracts list of noise information from etree'''
+    def from_et(cls, et_in):
+        '''Extracts list of product information from etree from L1 annotation data set (LADS)'''
         if et_in is not None:
             cls.xml_et=et_in
         cls.image_information_slant_range_time=cls._parse_scalar('imageAnnotation/imageInformation/slantRangeTime','scalar_float')
@@ -203,19 +210,19 @@ class ProductAnnotation(AnnotationBase):
 @dataclass
 class AuxCal(AnnotationBase):
     '''AUX_CAL'''
-    beam_nominal_near_range:float
-    beam_nominal_far_range:float
-    elevation_angle_increment:float
-    elevation_antenna_pattern:np.ndarray
-    azimuth_angle_increment:float
-    azimuth_antenna_pattern:np.ndarray
-    azimuth_antenna_element_pattern_increment:float
-    azimuth_antenna_element_pattern:float
-    absolute_calibration_constant:float
-    noise_calibration_factor:float
+    beam_nominal_near_range: float
+    beam_nominal_far_range: float
+    elevation_angle_increment: float
+    elevation_antenna_pattern: np.ndarray
+    azimuth_angle_increment: float
+    azimuth_antenna_pattern: np.ndarray
+    azimuth_antenna_element_pattern_increment: float
+    azimuth_antenna_element_pattern: float
+    absolute_calibration_constant: float
+    noise_calibration_factor: float
 
     @classmethod
-    def from_et(cls,et_in:ET, pol:str, str_swath:str):
+    def from_et(cls,et_in: ET, pol: str, str_swath: str):
         '''Extracts list of information AUX_CAL from its etree'''
         calibration_params_list=et_in.find('calibrationParamsList')
         for calibration_params in calibration_params_list:
@@ -244,24 +251,7 @@ class AuxCal(AnnotationBase):
         return cls
 
 
-
-def is_eap_correction_necesasry(ipf_version:float) -> int :
-    '''Examines if what level of EAP correction is necessary, based on the IPF version
-    0: No EAP correction necessary (i.e. correction already applied)
-    1: Phase-only correction is necessary
-    2: Phase and Magniture correction is necessary'''
-    ipf_ver_int=int(ipf_version*100)
-    #Based on ESA technical document
-    if ipf_ver_int>=243:
-        return 0 # No EAP correction necessary (i.e. correction already applied)
-    elif ipf_ver_int>=236:
-        return 1 # Phase-only correction is necessary
-    else:
-        return 2 # Phase and Magniture correction is necessary
-
-
-
-def closest_block_to_azimuth_time(vector_azimuth_time:np.ndarray, azmuth_time_burst:datetime.datetime) -> int:
+def closest_block_to_azimuth_time(vector_azimuth_time: np.ndarray, azmuth_time_burst: datetime.datetime) -> int:
     '''Find the id of the closest data block in annotation.'''
 
     return np.argmin(np.abs(vector_azimuth_time-azmuth_time_burst))
@@ -274,18 +264,25 @@ class BurstNoise: #For thermal noise correction
     range_line: float = None
     range_pixel: np.ndarray = None
     range_lut: np.ndarray = None
+
     azimuth_first_azimuth_line: int = None
     azimuth_first_range_sample: int = None
     azimuth_last_azimuth_line: int = None
     azimuth_last_range_sample: int = None
     azimuth_line: np.ndarray = None
     azimuth_lut: np.ndarray = None
-    line_from:int=None
-    line_to:int=None
+
+    line_from: int = None
+    line_to: int = None
 
 
-    def from_noise_annotation(self, noise_annotation:NoiseAnnotation, azimuth_time:datetime, line_from:int, line_to:int, ipf_version:float=3.10):
-        '''Extracts the noise correction info for the burst'''
+    def from_noise_annotation(self, noise_annotation: NoiseAnnotation, azimuth_time: datetime, line_from: int, line_to: int, ipf_version: float = 3.10):
+        '''
+        Extracts the noise correction info for the burst
+        noise_annotation: swath-wide annotation information
+        azimuth_time: azimuth time of the burst
+        line_from, line_to: line numbers of the burst. (starting from 0). Can be calaulated from Sentinel1BurstSlc.i_burst
+        '''
         threshold_ipf_version=2.90 #IPF version that stared to provide azimuth noise vector
         id_closest=closest_block_to_azimuth_time(noise_annotation.rg_list_azimuth_time,azimuth_time)
         self.range_azimith_time=noise_annotation.rg_list_azimuth_time[id_closest]
@@ -377,8 +374,8 @@ class BurstEAP:
        Currently Under development
     '''
     #from LADS
-    Ns:int #number of samples
-    fs:float #range sampling rate
+    Ns: int #number of samples
+    fs: float #range sampling rate
     eta_start: datetime
     tau_0: float #imageInformation/slantRangeTime
     tau_sub: np.ndarray #antennaPattern/slantRangeTime
@@ -390,3 +387,18 @@ class BurstEAP:
     G_eap: np.ndarray #elevationAntennaPattern
     delta_theta:float #elavationAngleIncrement
 
+    @classmethod
+    def from_product_annotation_and_aux_cal(cls,product_annotation: ProductAnnotation, aux_cal: AuxCal, azimuth_time: datetime):
+        '''Extracts the calibration info for the burst'''
+        id_closest=closest_block_to_azimuth_time(product_annotation.antenna_pattern_azimuth_time, azimuth_time)
+        cls.Ns=product_annotation.number_of_samples
+        cls.fs=product_annotation.range_sampling_rate
+        cls.eta_start=azimuth_time
+        cls.tau_0=product_annotation.antenna_pattern_slant_range_time[id_closest]
+        cls.tau_sub=product_annotation.antenna_pattern_slant_range_time[id_closest]
+        cls.theta_am=product_annotation.antenna_pattern_elevation_angle
+
+        cls.G_eap=aux_cal.elevation_antenna_pattern
+        cls.delta_theta=aux_cal.elevation_angle_increment
+
+        return cls
