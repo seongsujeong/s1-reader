@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 from packaging import version
-from scipy.interpolate import InterpolatedUnivariateSpline
+from scipy.interpolate import InterpolatedUnivariateSpline, interp1d
 
 #some thresholds
 version_threshold_azimuth_noise_vector=version.parse('2.90')
@@ -420,8 +420,7 @@ class BurstCalibration:
     gamma: np.ndarray = None
     dn: np.ndarray = None
 
-    @classmethod
-    def from_calibration_annotation(cls, calibration_annotation: CalibrationAnnotation, azimuth_time: datetime.datetime):
+    def from_calibration_annotation(self, calibration_annotation: CalibrationAnnotation, azimuth_time: datetime.datetime):
         '''
         A class method that extracts the calibration info for the burst
 
@@ -438,16 +437,20 @@ class BurstCalibration:
             EAP correction info for the burst
         '''
         id_closest = closest_block_to_azimuth_time(calibration_annotation.list_azimuth_time, azimuth_time)
-        cls.azimuth_time = calibration_annotation.list_azimuth_time[id_closest]
-        cls.line = calibration_annotation.list_line[id_closest]
-        cls.pixel = calibration_annotation.list_pixel[id_closest]
-        cls.sigma_naught = calibration_annotation.list_sigma_nought[id_closest]
-        cls.beta_naught = calibration_annotation.list_beta_nought[id_closest]
-        cls.gamma = calibration_annotation.list_gamma[id_closest]
-        cls.dn = calibration_annotation.list_dn[id_closest]
+        self.azimuth_time = calibration_annotation.list_azimuth_time[id_closest]
+        self.line = calibration_annotation.list_line[id_closest]
+        self.pixel = calibration_annotation.list_pixel[id_closest]
+        self.sigma_naught = calibration_annotation.list_sigma_nought[id_closest]
+        self.beta_naught = calibration_annotation.list_beta_nought[id_closest]
+        self.gamma = calibration_annotation.list_gamma[id_closest]
+        self.dn = calibration_annotation.list_dn[id_closest]
 
-        return cls
-
+        matrix_beta_naught = np.array(calibration_annotation.list_beta_nought)
+        if matrix_beta_naught.min() == matrix_beta_naught.max(): #NOTE It might not be a good idea to attempt '==' operation on the floating point data.
+            self.beta_naught = np.min(matrix_beta_naught)
+        else:
+            #TODO Switch to LUT-based method when there is significant changes in the array
+            self.beta_naught = np.mean(matrix_beta_naught)
 
 @dataclass
 class BurstEAP:
@@ -466,8 +469,8 @@ class BurstEAP:
     G_eap: np.ndarray #elevationAntennaPattern
     delta_theta:float #elavationAngleIncrement
 
-    @classmethod
-    def from_product_annotation_and_aux_cal(cls, product_annotation: ProductAnnotation, aux_cal: AuxCal, azimuth_time: datetime.datetime):
+
+    def from_product_annotation_and_aux_cal(self,product_annotation: ProductAnnotation, aux_cal: AuxCal, azimuth_time: datetime.datetime):
         '''
         A class method that extracts the EAP correction info for the IW SLC burst
 
@@ -475,25 +478,110 @@ class BurstEAP:
         ----------
         product_annotation: ProductAnnotation
             A swath-wide product annotation class
+
         aux_cal: AuxCal
             AUX_CAL information that corresponds to the sensing time
+
         azimuth_time: datetime.datetime
             Azimuth time of the burst
 
-        Returns
-        -------
-        cls: BurstEAP
-            EAP correction info for the burst
         '''
         id_closest = closest_block_to_azimuth_time(product_annotation.antenna_pattern_azimuth_time, azimuth_time)
-        cls.Ns = product_annotation.number_of_samples
-        cls.fs = product_annotation.range_sampling_rate
-        cls.eta_start = azimuth_time
-        cls.tau_0 = product_annotation.antenna_pattern_slant_range_time[id_closest]
-        cls.tau_sub = product_annotation.antenna_pattern_slant_range_time[id_closest]
-        cls.theta_am = product_annotation.antenna_pattern_elevation_angle
+        self.Ns = product_annotation.number_of_samples
+        self.fs = product_annotation.range_sampling_rate
+        self.eta_start = azimuth_time
+        self.tau_0 = product_annotation.antenna_pattern_slant_range_time[id_closest]
+        self.tau_sub = product_annotation.antenna_pattern_slant_range_time[id_closest]
+        self.theta_sub = product_annotation.antenna_pattern_elevation_pattern[id_closest]
+        #self.theta_am = product_annotation.antenna_pattern_elevation_angle
+        self.G_eap = aux_cal.elevation_antenna_pattern
+        self.delta_theta = aux_cal.elevation_angle_increment
 
-        cls.G_eap = aux_cal.elevation_antenna_pattern
-        cls.delta_theta = aux_cal.elevation_angle_increment
+        self.ascending_node_time = product_annotation.ascending_node_time
 
-        return cls
+
+    def export_lut(self):
+        '''Returns LUT for EAP correction. Based on ESA dicuemnt "Impact of the Elevation Antenna Pattern Phase Compensation on the Interferometric Phase Preservation"'''
+
+        #Step 1. Retrieve two-way complex EAP term
+        n_elt=len(self.G_eap)
+
+        theta_am=(np.arange(n_elt)-(n_elt-1)/2)*self.delta_theta
+
+        #Step 2. finding the roll steering angle
+         #2.1. get ascending node time - DONE
+        delta_anx=self.eta_start-self.ascending_node_time
+        theta_offnadir=self._anx2roll(delta_anx)
+
+         #2.2. get state vector to calculate satellite height - Is it necessary?
+
+
+        #Step 3. Computing the elevtion angle in the geometry of view
+        theta_eap=theta_am+theta_offnadir
+
+        #Step 4. re-interpolating the 2-way complex EAP
+        tau=self.tau_0+np.arange(self.Ns)/self.fs
+
+        #4.1. set up interpolator
+        theta=np.interp(tau, self.tau_sub, self.theta_sub)
+
+        interpolator_G = interp1d(theta_eap,self.G_eap)
+        G_eap_interpolated = interpolator_G(theta)
+        phi_EAP = np.angle(G_eap_interpolated)
+        cJ = np.complex64(1.0j)
+        G_EAP = np.exp(cJ * phi_EAP)
+        return G_EAP
+
+    def _anx2roll(self,delta_anx):
+        '''
+        Returns the Platform nominal roll as function of elapsed time from
+        ascending node crossing time (ANX).
+        Straight from S1A documentation.
+        '''
+
+        ####Estimate altitude based on time elapsed since ANX
+        altitude = self._anx2height(delta_anx)
+
+        ####Reference altitude
+        href=711.700 #;km
+
+        ####Reference boresight at reference altitude
+        boresight_ref= 29.450 # ; deg
+
+        ####Partial derivative of roll vs altitude
+        alpha_roll = 0.0566 # ;deg/km
+
+        ####Estimate nominal roll
+        nominal_roll = boresight_ref - alpha_roll* (altitude/1000.0 - href)  #Theta off nadir
+
+        return nominal_roll
+
+
+    def _anx2height(self,delta_anx):
+        '''
+        Returns the platform nominal height as function of elapse time from
+        ascending node crossing time (ANX).
+        Straight from S1A documention.
+        '''
+
+        ###Average height
+        h0 = 707714.8  #;m
+
+        ####Perturbation amplitudes
+        h = np.array([8351.5, 8947.0, 23.32, 11.74]) #;m
+
+        ####Perturbation phases
+        phi = np.array([3.1495, -1.5655 , -3.1297, 4.7222]) #;radians
+
+        ###Orbital time period in seconds
+        Torb = (12*24*60*60)/175.
+
+        ###Angular velocity
+        worb = 2*np.pi / Torb
+
+        ####Evaluation of series
+        ht=h0
+        for i in range(len(h)):
+            ht += h[i] * np.sin((i+1) * worb * delta_anx + phi[i])
+
+        return ht
