@@ -53,12 +53,12 @@ def parse_polynomial_element(elem, poly_name, ipf_version=version.parse('3.10'))
 
     half_c = 0.5 * isce3.core.speed_of_light
     r0 = half_c * float(elem.find('t0').text)
-    
+
     try:
         coeffs = [float(x) for x in elem.find(poly_name).text.split()]
     except ValueError:
         coeffs=[float(x.text) for x in elem[1:]]
-        
+
     poly1d = isce3.core.Poly1d(coeffs, r0, half_c)
     return (ref_time, poly1d)
 
@@ -360,7 +360,7 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
     noise_annotation_path = annotation_path.replace('annotation/','annotation/calibration/noise-')
     with open_method(noise_annotation_path, 'r') as f_nads:
         tree_nads = ET.parse(f_nads)
-        noise_annotation = s1_annotation.NoiseAnnotation.from_et(tree_nads,ipf_version=ipf_version)
+        noise_annotation = s1_annotation.NoiseAnnotation.from_et(tree_nads,tree_lads,ipf_version=ipf_version)
 
     # Nearly all metadata loaded here is common to all bursts in annotation XML
     with open_method(annotation_path, 'r') as f:

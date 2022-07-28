@@ -175,35 +175,53 @@ class NoiseAnnotation(AnnotationBase):
     az_noise_azimuth_lut: np.ndarray
 
     @classmethod
-    def from_et(cls,et_in: ET, ipf_version: version.Version = version.parse('3.10')):
-        '''Extracts list of noise information from etree'''
-        
+    def from_et(cls,et_in:ET,et_in_lads:ET=None,ipf_version=version.parse('3.10')):
+        '''Extracts list of noise information from etree
+
+        Parameters
+        ----------
+        et_in: ET
+            ElementTree for Noise Annotation Data Set .xml
+
+        et_in_lads: ET
+            ElementTree for Level1 Annotation Data Set .xml
+
+        ipf_version: version.Version = Version('2.82')
+            IPF version of the data
+
+
+        Returns
+        -------
+        cls: NoiseAnnotation
+            A class populated by NADS and LADS provided
+
+        '''
         if et_in is not None:
             cls.xml_et = et_in
 
-        if ipf_version < version_threshold_azimuth_noise_vector: #legacy SAFE data
-            cls.rg_list_azimuth_time = cls._parse_vectorlist('noiseVectorList','azimuthTime','datetime')
-            cls.rg_list_line = cls._parse_vectorlist('noiseVectorList','line','scalar_int')
-            cls.rg_list_pixel = cls._parse_vectorlist('noiseVectorList','pixel','vector_int')
-            cls.rg_list_noise_range_lut = cls._parse_vectorlist('noiseVectorList','noiseLut','vector_float')
-            cls.az_first_azimuth_line = None
-            cls.az_first_range_sample = None
+        if ipf_version < version.parse('2.90'): #legacy SAFE data
+            cls.rg_list_azimuth_time = cls._parse_vectorlist('noiseVectorList', 'azimuthTime', 'datetime')
+            cls.rg_list_line = cls._parse_vectorlist('noiseVectorList', 'line', 'scalar_int')
+            cls.rg_list_pixel = cls._parse_vectorlist('noiseVectorList', 'pixel', 'vector_int')
+            cls.rg_list_noise_range_lut = cls._parse_vectorlist('noiseVectorList', 'noiseLut', 'vector_float')
+            cls.az_first_azimuth_line = 0
+            cls.az_first_range_sample = 0
             cls.az_last_azimuth_line = None
-            cls.az_last_range_sample = None
+            cls.az_last_range_sample = int(et_in_lads.find('imageAnnotation/imageInformation/numberOfSamples').text)-1
             cls.az_line = None
             cls.az_noise_azimuth_lut = None
 
         else:
-            cls.rg_list_azimuth_time = cls._parse_vectorlist('noiseRangeVectorList','azimuthTime','datetime')
-            cls.rg_list_line = cls._parse_vectorlist('noiseRangeVectorList','line','scalar_int')
-            cls.rg_list_pixel = cls._parse_vectorlist('noiseRangeVectorList','pixel','vector_int')
-            cls.rg_list_noise_range_lut = cls._parse_vectorlist('noiseRangeVectorList','noiseRangeLut','vector_float')
-            cls.az_first_azimuth_line = cls._parse_vectorlist('noiseAzimuthVectorList','firstAzimuthLine','scalar_int')[0]
-            cls.az_first_range_sample = cls._parse_vectorlist('noiseAzimuthVectorList','firstRangeSample','scalar_int')[0]
-            cls.az_last_azimuth_line = cls._parse_vectorlist('noiseAzimuthVectorList','lastAzimuthLine','scalar_int')[0]
-            cls.az_last_range_sample = cls._parse_vectorlist('noiseAzimuthVectorList','lastRangeSample','scalar_int')[0]
-            cls.az_line = cls._parse_vectorlist('noiseAzimuthVectorList','line','vector_int')[0]
-            cls.az_noise_azimuth_lut = cls._parse_vectorlist('noiseAzimuthVectorList','noiseAzimuthLut','vector_float')[0]
+            cls.rg_list_azimuth_time = cls._parse_vectorlist('noiseRangeVectorList', 'azimuthTime', 'datetime')
+            cls.rg_list_line = cls._parse_vectorlist('noiseRangeVectorList', 'line', 'scalar_int')
+            cls.rg_list_pixel = cls._parse_vectorlist('noiseRangeVectorList', 'pixel', 'vector_int')
+            cls.rg_list_noise_range_lut = cls._parse_vectorlist('noiseRangeVectorList', 'noiseRangeLut', 'vector_float')
+            cls.az_first_azimuth_line = cls._parse_vectorlist('noiseAzimuthVectorList', 'firstAzimuthLine', 'scalar_int')[0]
+            cls.az_first_range_sample = cls._parse_vectorlist('noiseAzimuthVectorList', 'firstRangeSample', 'scalar_int')[0]
+            cls.az_last_azimuth_line = cls._parse_vectorlist('noiseAzimuthVectorList', 'lastAzimuthLine', 'scalar_int')[0]
+            cls.az_last_range_sample = cls._parse_vectorlist('noiseAzimuthVectorList', 'lastRangeSample', 'scalar_int')[0]
+            cls.az_line = cls._parse_vectorlist('noiseAzimuthVectorList', 'line', 'vector_int')[0]
+            cls.az_noise_azimuth_lut = cls._parse_vectorlist('noiseAzimuthVectorList', 'noiseAzimuthLut', 'vector_float')[0]
 
         return cls
 
@@ -374,7 +392,7 @@ class BurstNoise: #For thermal noise correction
         self.line_from = line_from
         self.line_to = line_to
 
-        if ipf_version >= version_threshold_azimuth_noise_vector: 
+        if ipf_version >= version_threshold_azimuth_noise_vector:
             #Azinuth noise LUT exists - crop to the extent of the burst
             id_top = np.argmin(np.abs(noise_annotation.az_line-line_from))
             id_bottom = np.argmin(np.abs(noise_annotation.az_line-line_to))
@@ -387,24 +405,27 @@ class BurstNoise: #For thermal noise correction
             self.azimuth_lut = noise_annotation.az_noise_azimuth_lut[id_top:id_bottom]
 
 
-        #return cls
-
-
     def export_lut(self):
         '''Gives out the LUT table whose size is the same as the burst SLC'''
-        ncols = self.azimuth_last_range_sample-self.azimuth_first_range_sample+1
-        nrows = self.line_to-self.line_from+1
+        ncols=self.azimuth_last_range_sample-self.azimuth_first_range_sample+1
+        nrows=self.line_to-self.line_from+1
 
-        intp_rg_lut = InterpolatedUnivariateSpline(self.range_pixel, self.range_lut, k=1)
-        intp_az_lut = InterpolatedUnivariateSpline(self.azimuth_line, self.azimuth_lut, k=1)
+        #interpolator for range noise vector
+        intp_rg_lut=InterpolatedUnivariateSpline(self.range_pixel,self.range_lut,k=1)
+        grid_rg=np.arange(self.azimuth_last_range_sample+1)
+        rg_lut_interp=intp_rg_lut(grid_rg).reshape((1,ncols))
 
-        grid_rg = np.arange(self.azimuth_last_range_sample+1)
-        grid_az = np.arange(self.line_from, self.line_to+1)
+        #interpolator for azimuth noise vector - take IPF version into consideration
+        if (self.azimuth_line is None) or (self.azimuth_lut is None): # IPF <2.90
+            az_lut_interp=np.ones(nrows).reshape((nrows,1))
 
-        rg_lut_interp = intp_rg_lut(grid_rg).reshape((1,ncols))
-        az_lut_interp = intp_az_lut(grid_az).reshape((nrows,1))
+        else: #IPF >= 2.90
+            intp_az_lut=InterpolatedUnivariateSpline(self.azimuth_line,self.azimuth_lut,k=1)
+            grid_az=np.arange(self.line_from,self.line_to+1)
+            az_lut_interp=intp_az_lut(grid_az).reshape((nrows,1))
 
-        arr_lut_total = np.matmul(az_lut_interp, rg_lut_interp)
+        arr_lut_total=np.matmul(az_lut_interp,rg_lut_interp)
+
         return arr_lut_total
 
 
