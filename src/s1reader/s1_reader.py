@@ -34,7 +34,7 @@ def as_datetime(t_str, fmt = "%Y-%m-%dT%H:%M:%S.%f"):
     '''
     return datetime.datetime.strptime(t_str, fmt)
 
-def parse_polynomial_element(elem, poly_name, ipf_version=3.10):
+def parse_polynomial_element(elem, poly_name, ipf_version=version.parse('3.10')):
     '''Parse azimuth FM (Frequency Modulation) rate element to reference time and poly1d tuples.
 
     Parameters
