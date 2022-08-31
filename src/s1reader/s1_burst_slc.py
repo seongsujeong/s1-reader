@@ -171,6 +171,7 @@ class Sentinel1BurstSlc:
     # Correction information
     burst_calibration: s1_annotation.BurstCalibration  # Radiometric correction
     burst_noise: s1_annotation.BurstNoise  # Thermal noise correction
+    thermal_noise_lut: np.ndarray
     burst_eap: s1_annotation.BurstEAP  # EAP correction
 
 
@@ -622,46 +623,6 @@ class Sentinel1BurstSlc:
     def swath_name(self):
         '''Swath name in iw1, iw2, iw3.'''
         return self.burst_id.split('_')[1]
-
-    @property
-    def thermal_noise_lut(self):
-        '''Returns the burst-sized LUT for thermal noise correction
-
-        Returns
-        -------
-        arr_lut_total: np.array
-            2d array containing thermal noise correction look up table values
-        '''
-
-        if self.burst_noise is None:
-            raise ValueError('burst_noise is not defined for this burst.')
-
-        nrows, ncols = self.shape
-
-        # Interpolate the range noise vector
-        rg_lut_interp_obj = InterpolatedUnivariateSpline(self.burst_noise.range_pixel,
-                                                         self.burst_noise.range_lut,
-                                                         k=1)
-        if self.burst_noise.azimuth_last_range_sample is not None:
-            vec_rg = np.arange(self.burst_noise.azimuth_last_range_sample + 1)
-        else:
-            vec_rg = np.arange(ncols)
-        rg_lut_interpolated = rg_lut_interp_obj(vec_rg).reshape((1, ncols))
-
-
-        # Interpolate the azimuth noise vector
-        if (self.burst_noise.azimuth_line is None) or (self.burst_noise.azimuth_lut is None):
-            az_lut_interpolated = np.ones(nrows).reshape((nrows, 1))
-        else:  # IPF >= 2.90
-            az_lut_interp_obj = InterpolatedUnivariateSpline(self.burst_noise.azimuth_line,
-                                                             self.burst_noise.azimuth_lut,
-                                                             k=1)
-            vec_az = np.arange(self.burst_noise.line_from, self.burst_noise.line_to + 1)
-            az_lut_interpolated = az_lut_interp_obj(vec_az).reshape((nrows, 1))
-
-        arr_lut_total = np.matmul(az_lut_interpolated, rg_lut_interpolated)
-
-        return arr_lut_total
 
     @property
     def eap_compensation_lut(self):

@@ -407,6 +407,8 @@ class BurstNoise:
     line_from: int
     line_to: int
 
+    ipf_version: version.Version
+
     @classmethod
     def from_noise_annotation(cls, noise_annotation: NoiseAnnotation, azimuth_time: datetime.datetime,
                               line_from: int, line_to: int, ipf_version: version.Version):
@@ -422,14 +424,13 @@ class BurstNoise:
             First line of the burst in the subswath
         line_to: int
             Last line of the burst in the subswath
-        ipf_version: float
+        ipf_version: version.Version
             IPF version of the SAFE data
 
         Returns
         -------
         cls: BurstNoise
             An instance from BurstNoise initialized by the input parameters
-
         '''
 
         basename_nads = noise_annotation.basename_annotation
@@ -467,7 +468,58 @@ class BurstNoise:
                    azimuth_first_azimuth_line, azimuth_first_range_sample,
                    azimuth_last_azimuth_line, azimuth_last_range_sample,
                    azimuth_line, azimuth_lut,
-                   line_from, line_to)
+                   line_from, line_to, ipf_version)
+
+    def compute_burst_thermal_noise_lut(self, burst_shape):
+        '''Returns the burst-sized LUT for thermal noise correction
+
+        Parameters
+        ----------
+        burst_shape: tuple[int, int]
+            Shape of burst and corresponding thermal noise LUT
+
+        Returns
+        -------
+        arr_lut_total: np.array
+            2d array containing thermal noise correction look up table values
+        '''
+        # check IPF version
+        if not self.can_compute_thermal_noise_lut():
+            print("IPF version doesn't no support thermal noise")
+            return np.ones(burst_shape)
+
+        nrows, ncols = burst_shape
+
+        # Interpolate the azimuth noise vector
+        az_lut_interp_obj = InterpolatedUnivariateSpline(self.azimuth_line,
+                                                         self.azimuth_lut,
+                                                         k=1)
+        vec_az = np.arange(self.line_from, self.line_to + 1)
+        az_lut_interpolated = az_lut_interp_obj(vec_az)
+
+        # Interpolate the range noise vector
+        rg_lut_interp_obj = InterpolatedUnivariateSpline(self.range_pixel,
+                                                         self.range_lut,
+                                                         k=1)
+        vec_rg = np.arange(self.azimuth_last_range_sample + 1)
+        rg_lut_interpolated = rg_lut_interp_obj(vec_rg)
+
+        arr_lut_total = np.matmul(az_lut_interpolated[..., np.newaxis],
+                                  rg_lut_interpolated[np.newaxis, ...])
+        return arr_lut_total
+
+    def can_compute_thermal_noise_lut(self):
+        '''
+        Determine if class instance IPF version supports azimuth noise vector
+
+        Returns
+        -------
+        _: bool
+            True if thermal noise vector is supported, otherwise False.
+        '''
+        if self.ipf_version < ipf_version_az_noise_vector_available_from:
+            return False
+        return True
 
 
 @dataclass

@@ -537,12 +537,18 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
 
         burst_id = f't{track_number:03d}_{id_burst}_{subswath_id.lower()}'
 
-
         #Extract burst-wise information for Calibration, Noise, and EAP correction
         burst_calibration = BurstCalibration.from_calibration_annotation(calibration_annotation,
                                                                          sensing_start)
         burst_noise = BurstNoise.from_noise_annotation(noise_annotation, sensing_start,
                                              i*n_lines, (i+1)*n_lines-1, ipf_version)
+
+        if burst_noise.can_compute_thermal_noise_lut:
+            thermal_noise_lut = burst_noise.compute_burst_thermal_noise_lut((n_lines,
+                                                                             n_samples))
+        else:
+            thermal_noise_lut = None
+
         if flag_apply_eap.phase_correction:
             burst_aux_cal = BurstEAP.from_product_annotation_and_aux_cal(product_annotation,
                                                                          aux_cal_subswath,
@@ -563,7 +569,8 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
                                       last_sample, first_valid_line, last_line,
                                       range_window_type, range_window_coeff,
                                       rank, prf_raw_data, range_chirp_ramp_rate,
-                                      burst_calibration, burst_noise, burst_aux_cal)
+                                      burst_calibration, burst_noise,
+                                      thermal_noise_lut, burst_aux_cal)
 
 
     return bursts
@@ -571,6 +578,8 @@ def burst_from_xml(annotation_path: str, orbit_path: str, tiff_path: str,
 def _is_zip_annotation_xml(path: str, id_str: str) -> bool:
     ''' Check if path is annotation XMl and not calibration or rfi related
 
+    Parameters
+    ----------
     path : str
         Path from SAFE zip to be checked
     id_str : str
