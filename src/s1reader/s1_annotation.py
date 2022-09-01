@@ -680,7 +680,6 @@ class BurstEAP:
 
         Code copied from ISCE2.
 
-
         Parameters:
         -----------
         delta_anx: float
@@ -694,24 +693,60 @@ class BurstEAP:
 
         '''
 
-        ### Average height
-        h_0 = 707714.8  #;m
+        # Average height (m)
+        h_0 = 707714.8
 
-        #### Perturbation amplitudes
-        h = np.array([8351.5, 8947.0, 23.32, 11.74]) #;m
+        # Perturbation amplitudes (m)
+        h = np.array([8351.5, 8947.0, 23.32, 11.74])
 
-        #### Perturbation phases
-        phi = np.array([3.1495, -1.5655 , -3.1297, 4.7222]) #;radians
+        # Perturbation phases (radians)
+        phi = np.array([3.1495, -1.5655 , -3.1297, 4.7222])
 
-        ###O rbital time period in seconds
+        # Orbital time period in seconds
         t_orb = (12*24*60*60) / 175.
 
-        ### Angular velocity
+        # Angular velocity
         worb = 2*np.pi / t_orb
 
-        #### Evaluation of series
+        # Evaluation of series
         h_t = h_0
         for i, h_i in enumerate(h):
             h_t += h_i * np.sin((i+1) * worb * delta_anx + phi[i])
 
         return h_t
+
+    def compute_eap_compensation_lut(self):
+        '''Returns LUT for EAP compensation.
+        Based on ESA docuemnt :
+        "Impact of the Elevation Antenna Pattern Phase Compensation
+         on the Interferometric Phase Preservation"
+
+        Document URL:
+        https://sentinel.esa.int/documents/247904/1653440/Sentinel-1-IPF_EAP_Phase_correction
+
+        Returns:
+        -------
+            gain_eap: EAP phase for the burst to be compensated
+
+        '''
+
+        n_elt = len(self.gain_eap)
+
+        theta_am = (np.arange(n_elt) - (n_elt - 1) / 2) * self.delta_theta
+
+        delta_anx = self.eta_start-self.ascending_node_time
+        theta_offnadir = self._anx2roll(delta_anx.seconds + delta_anx.microseconds * 1.0e-6)
+
+        theta_eap = theta_am + theta_offnadir
+
+        tau = self.tau_0 + np.arange(self.num_sample) / self.freq_sampling
+
+        theta = np.interp(tau, self.tau_sub, self.theta_sub)
+
+        interpolator_gain_obj = interp1d(theta_eap, self.gain_eap)
+        gain_eap_interpolated = interpolator_gain_obj(theta)
+        phi_eap = np.angle(gain_eap_interpolated)
+        c_j = np.complex64(1.0j)
+        gain_eap = np.exp(c_j * phi_eap)
+
+        return gain_eap
